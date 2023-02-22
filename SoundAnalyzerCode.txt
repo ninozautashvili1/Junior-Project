@@ -1,0 +1,998 @@
+#include <math.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Tone32.h>
+
+#include "arduinoFFT.h"
+arduinoFFT FFT = arduinoFFT();
+
+#define SCREEN_WIDTH 128 // OLED display width,  in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+#define SAMPLES 1024              // Must be a power of 2
+#define SAMPLING_FREQUENCY 18500 // Hz, must be 40000 or less due to ADC conversion time. Determines maximum frequency that can be analysed by the FFT Fmax=sampleF/2.
+#define amplitude 1200           // Depending on your audio source level, you may need to increase this value
+#define switch_pin 2
+#define audio_pin 35
+#define button_pin 13
+#define speaker_pin 14
+
+#define RED_pin 27
+#define ORANGE_pin 26
+#define YELLOW_pin 25
+#define GREEN_pin 33
+#define BLUE_pin 32
+
+#define RGBRED_pin 5
+#define RGBGREEN_pin 18
+#define RGBBLUE_pin 19
+
+unsigned int sampling_period_us;
+unsigned long microseconds;
+byte peak[32] = {0};
+double vReal[SAMPLES];
+double vImag[SAMPLES];
+unsigned long newTime, oldTime;
+
+
+// declare an SSD1306 display object connected to I2C
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+//float peak = 0;
+int notey = 0;
+double f0 = 261.6;
+int n;
+bool isSharp;
+String noteName;
+int switchMode;
+double fn;
+//double maxAmp = -1 ;
+//int maxInd ;
+int soundLevel = 0;
+String intrvlStr11 ;
+String intrvlStr12;
+String intrvlStr21 ;
+String intrvlStr22;
+//String octaveNum;
+String note ;
+double maxAmp ;
+int numOfNotes = 1;
+
+int noteArray[10] = {0};
+int noteDurations[10] = {0};
+// bitmap of arduino-icon image
+const unsigned char ArduinoIcon [] PROGMEM = {
+  // 'arduino-icon', 128x64px
+  // 'notesys8', 128x64px
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8,
+  0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8,
+  0x30, 0x31, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x18, 0x06, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0xc0, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x18, 0x06, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x80, 0x78, 0x60, 0x00, 0x00, 0x00, 0x18, 0x02, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x31, 0x00, 0x3c, 0xf0, 0x00, 0x00, 0x00, 0x18, 0x02, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x31, 0x80, 0x3c, 0xf0, 0x00, 0x00, 0x00, 0x18, 0x02, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x33, 0xf8, 0x3e, 0x70, 0x00, 0x00, 0x00, 0x18, 0x03, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8, 0x07, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8,
+  0x31, 0xf8, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x18, 0x0f, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0xf0, 0x3e, 0x60, 0x00, 0x00, 0x00, 0x18, 0x1f, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x00, 0x3e, 0x70, 0x00, 0x00, 0x00, 0x18, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x00, 0x3c, 0xf0, 0x00, 0x00, 0x00, 0x18, 0x7f, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x00, 0x3c, 0x70, 0x00, 0x00, 0x00, 0x18, 0x7c, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x00, 0x7c, 0x00, 0x00, 0x00, 0x00, 0x18, 0xf8, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x38, 0x00, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x19, 0xf0, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8,
+  0x30, 0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x1b, 0xc1, 0xfc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x1b, 0xc3, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x03, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x87, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x07, 0x80, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x87, 0xff, 0x80, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x0f, 0x47, 0x80, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x1c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x0e, 0x03, 0x80, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x0c, 0x23, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8,
+  0x31, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x19, 0x0c, 0x21, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x33, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x19, 0x84, 0x21, 0x80, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x86, 0x21, 0x80, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0xc1, 0x11, 0x80, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x60, 0x13, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x30, 0x16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x0c, 0x1c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38,
+  0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf8,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+double fn2;
+void setup() {
+  Serial.begin(115200);
+  sampling_period_us = round(1000000 * (1.0 / SAMPLING_FREQUENCY));
+  pinMode(button_pin, INPUT);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;);
+  }
+
+  delay(1000); // Pause for 2 seconds
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+
+  pinMode(RED_pin, OUTPUT);
+  pinMode(ORANGE_pin, OUTPUT);
+  pinMode(YELLOW_pin, OUTPUT);
+  pinMode(GREEN_pin, OUTPUT);
+  pinMode(BLUE_pin, OUTPUT);
+  pinMode(RGBRED_pin, OUTPUT);
+  pinMode(RGBGREEN_pin, OUTPUT);
+  pinMode(RGBBLUE_pin, OUTPUT);
+}
+
+void loop() {
+
+  performFFT();
+  countSoundLevel();
+  while (Serial.available() > 0) {
+    numOfNotes = Serial.parseInt();
+  }
+
+  int buttonState  = digitalRead(button_pin);
+
+
+  writeNotesInSerial(numOfNotes);
+  if (buttonState == HIGH) {
+    for (int thisNote = 0; thisNote < 10; thisNote++) {
+
+      tone(speaker_pin, noteArray[thisNote], noteDurations[thisNote], 1);
+      int pauseBetweenNotes = noteDurations[thisNote] * 1.30;
+      delay(pauseBetweenNotes);
+      // stop the tone playing:
+      noTone(speaker_pin, 1);
+      noteArray[thisNote] = 0;
+    }
+
+
+
+  }
+  switchMode = analogRead(switch_pin);
+
+  if (switchMode <= 200) {
+
+    digitalWrite(RED_pin, HIGH);
+    digitalWrite(ORANGE_pin, LOW);
+    digitalWrite(YELLOW_pin, LOW);
+    digitalWrite(GREEN_pin, LOW);
+    digitalWrite(BLUE_pin, LOW);
+    digitalWrite(RGBRED_pin, LOW);
+    digitalWrite(RGBGREEN_pin, LOW);
+    digitalWrite(RGBBLUE_pin, LOW);
+
+    // display.setTextColor(WHITE);
+    //display.clearDisplay();
+    //   display.invertDisplay(false);
+
+    drawSpectrum8();
+  } else if (switchMode > 200 && switchMode < 500 ) {
+    digitalWrite(RED_pin, LOW);
+    digitalWrite(ORANGE_pin, HIGH);
+    digitalWrite(YELLOW_pin, LOW);
+    digitalWrite(GREEN_pin, LOW);
+    digitalWrite(BLUE_pin, LOW);
+    digitalWrite(RGBRED_pin, LOW);
+    digitalWrite(RGBGREEN_pin, LOW);
+    digitalWrite(RGBBLUE_pin, LOW);
+
+    drawSpectrum16();
+  } else if (switchMode >= 500 && switchMode < 800) {
+    digitalWrite(RED_pin, LOW);
+    digitalWrite(ORANGE_pin, LOW);
+    digitalWrite(YELLOW_pin, HIGH);
+    digitalWrite(GREEN_pin, LOW);
+    digitalWrite(BLUE_pin, LOW);
+
+    digitalWrite(RGBRED_pin, LOW);
+    digitalWrite(RGBGREEN_pin, LOW);
+    digitalWrite(RGBBLUE_pin, LOW);
+
+    drawSpectrum32();
+  } else if (switchMode >= 800 && switchMode < 1600) {
+
+    digitalWrite(RED_pin, LOW);
+    digitalWrite(ORANGE_pin, LOW);
+    digitalWrite(YELLOW_pin, LOW);
+    digitalWrite(GREEN_pin, HIGH);
+    digitalWrite(BLUE_pin, LOW);
+
+    digitalWrite(RGBRED_pin, LOW);
+    digitalWrite(RGBGREEN_pin, LOW);
+    digitalWrite(RGBBLUE_pin, LOW);
+
+    // Clear the buffer.
+    display.clearDisplay();
+
+    // Draw bitmap on the screen
+
+    display.drawBitmap(0, 0, ArduinoIcon, 128, 64, 1);
+
+    if (soundLevel == 1) {
+      drawInNotes(fn);
+
+    }
+
+    display.display();
+
+
+  }  else if (switchMode >= 1600 && switchMode < 3000) {
+    digitalWrite(RED_pin, LOW);
+    digitalWrite(ORANGE_pin, LOW);
+    digitalWrite(YELLOW_pin, LOW);
+    digitalWrite(GREEN_pin, LOW);
+    digitalWrite(BLUE_pin, HIGH);
+
+    digitalWrite(RGBRED_pin, LOW);
+    digitalWrite(RGBGREEN_pin, LOW);
+    digitalWrite(RGBBLUE_pin, LOW);
+
+    display.clearDisplay();
+    display.drawBitmap(0, 0, ArduinoIcon, 128, 64, 1);
+    // drawInNotes(fn);
+    //    eraseMaxPeak(fn);
+    //    double peak2 = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+    //drawSecondNote(peak2);
+    //  int n2 = detectNoteNum(peak2);
+
+
+    if (soundLevel == 1) {
+      eraseMaxPeak(fn);
+      double peak2 = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+      findInterval(fn, peak2, intrvlStr11, intrvlStr12);
+      display.setCursor(0, 50);
+      display.println(intrvlStr11);
+      display.setCursor(0, 56);
+      display.println(intrvlStr12);
+      if (intrvlStr12 == "prime") {
+        drawInNotes(fn);
+      } else {
+        drawInNotes(fn);
+        drawSecondNote(peak2, 105);
+      }
+    }
+    display.display();
+
+  } else {
+    digitalWrite(RED_pin, LOW);
+    digitalWrite(ORANGE_pin, LOW);
+    digitalWrite(YELLOW_pin, LOW);
+    digitalWrite(GREEN_pin, LOW);
+    digitalWrite(BLUE_pin, LOW);
+
+    //191, 0, 255
+    digitalWrite(RGBRED_pin, 204);
+    digitalWrite(RGBGREEN_pin, 0);
+    digitalWrite(RGBBLUE_pin, 255);
+
+    display.clearDisplay();
+    display.drawBitmap(0, 0, ArduinoIcon, 128, 64, 1);
+
+    if (soundLevel == 1) {
+      eraseMaxPeak(fn);
+      double peak2 = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+      eraseMaxPeak(peak2);
+      double peak3 = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+      String peakStr1 = detectNoteName(fn);
+      String peakStr2 = detectNoteName(peak2);
+      String peakStr3 = detectNoteName(peak3);
+
+      findInterval(fn, peak2, intrvlStr11, intrvlStr12);
+      findInterval(peak2, peak3, intrvlStr21, intrvlStr22);
+      if (intrvlStr12 == "prime" && intrvlStr22 == "prime" ) {
+        drawInNotes(fn);
+      }  else if (intrvlStr12 != "prime" && intrvlStr22 != "prime") {
+        drawInNotes(fn);
+        drawSecondNote(peak2, 105);
+        drawSecondNote(peak3, 118);
+      } else if (intrvlStr12 != "prime" && intrvlStr22 == "prime") {
+        drawInNotes(fn);
+        drawSecondNote(peak2, 105);
+      } else if (intrvlStr12 == "prime" && intrvlStr22 != "prime") {
+        drawInNotes(fn);
+        drawSecondNote(peak3, 105);
+      }
+    }
+    display.display();
+
+  }
+
+}
+
+void performFFT() {
+  for (int i = 0; i < SAMPLES; i++) {
+    newTime = micros() - oldTime;
+    oldTime = newTime;
+    vReal[i] = analogRead(audio_pin); // A conversion takes about 1uS on an ESP32
+    vImag[i] = 0;
+    while (micros() < (newTime + sampling_period_us)) {
+      /* do nothing to wait */
+    }
+  }
+  FFT.DCRemoval();
+  FFT.Windowing(vReal, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+  FFT.Compute(vReal, vImag, SAMPLES, FFT_FORWARD);
+  FFT.ComplexToMagnitude(vReal, vImag, SAMPLES);
+
+  fn = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+  maxAmp = findMaxAmp();
+
+  if (millis() % 10 == 0) {
+    if (note == "") {
+      note =  detectNoteName(fn);
+      maxAmp = findMaxAmp();
+
+
+      // Serial.println(note);
+      for (int i = 0; i < 10; i++) {
+        if (noteArray[i] == 0) {
+          noteArray[i] = int(fn);
+          noteDurations[i] = 250;
+          break;
+        }
+      }
+    } else {
+      String curnote =  detectNoteName(fn);
+      double curAmp = findMaxAmp();
+      if (curnote == note && maxAmp >= curAmp) {
+
+      } else if (curnote == note && maxAmp < curAmp) {
+        note = curnote;
+        maxAmp = curAmp;
+
+        for (int i = 0; i < 10; i++) {
+          if (noteArray[i] == 0) {
+            noteArray[i] = int(fn);
+            noteDurations[i] = 250;
+            break;
+          }
+        }
+
+        // Serial.println(note);
+
+      } else if (curnote != note) {
+        // Serial.println(curnote);
+        note = curnote;
+        maxAmp = curAmp;
+
+        for (int i = 0; i < 10; i++) {
+          if (noteArray[i] == 0) {
+            noteArray[i] = int(fn);
+            noteDurations[i] = 250;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+}
+
+void drawSpectrum8() {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("0 0.2  1 2  3  4 6 9");
+  display.setCursor(110, 8);
+  display.println("KHz");
+
+  for (int i = 2; i < (SAMPLES / 2); i++) { // Don't use sample 0 and only first SAMPLES/2 are usable. Each array eleement represents a frequency and its value the amplitude.
+    if (vReal[i] > 2000) { // Add a crude noise filter, 10 x amplitude or more
+      //  soundLevel = (int)vReal[i] / amplitude;
+      if (i <= 14 )             displayBand8(0, (int)vReal[i] / amplitude);    //  0-250Hz
+      if (i >= 14   && i <= 27 )   displayBand8(1, (int)vReal[i] / amplitude); //  250-500Hz
+      if (i > 27   && i <= 55 )   displayBand8(2, (int)vReal[i] / amplitude);  //  500-1000Hz
+      if (i > 55   && i <= 110 )  displayBand8(3, (int)vReal[i] / amplitude);   // 1000 - 2000Hz
+      if (i > 110  && i <= 166 )  displayBand8(4, (int)vReal[i] / amplitude);   // 2000 - 3000 Hz
+      if (i > 166  && i <= 220 )  displayBand8(5, (int)vReal[i] / amplitude);  //  3000 - 4000 Hz
+      if (i > 220  && i <= 332 ) displayBand8(6, (int)vReal[i] / amplitude);   //  4000 - 6000Hz
+      if (i > 332        ) displayBand8(7, (int)vReal[i] / amplitude);        //   6000 - 9250Hz
+      //Serial.println(i);
+    }
+  }
+  if (millis() % 4 == 0) {
+    for (byte band = 0; band <= 6; band++) {
+      if (peak[band] > 0) peak[band] -= 1; // Decay the peak
+    }
+  }
+  display.display();
+}
+
+void displayBand8(int band, int dsize) {
+  int dmax = 50;
+  if (dsize > dmax) dsize = dmax;
+  // if (band == 7) display.drawFastHLine(1 + 18 * 6, 0, 14, WHITE);
+  for (int s = 0; s <= dsize; s = s + 2) {
+    display.drawFastHLine(1 + 16 * (band), 64 - s, 14, WHITE);
+  }
+  if (dsize > peak[band]) {
+    peak[band] = dsize;
+  }
+}
+
+void drawSpectrum16() {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("0 0.3 0.6 0.9 1.5 4 9");
+  display.setCursor(110, 8);
+  display.println("KHz");
+  for (int i = 2; i < (SAMPLES / 2); i++) { // Don't use sample 0 and only first SAMPLES/2 are usable. Each array eleement represents a frequency and its value the amplitude.
+    if (vReal[i] > 2000) { // Add a crude noise filter, 10 x amplitude or more
+      //  soundLevel = (int)vReal[i] / amplitude;
+      if (i <= 11 )             displayBand16(0, (int)vReal[i] / amplitude); //    0-200Hz
+      if (i > 11   && i <= 16 )   displayBand16(1, (int)vReal[i] / amplitude); //  200-300Hz
+      if (i > 16   && i <= 22 )   displayBand16(2, (int)vReal[i] / amplitude); //  300-400Hz
+      if (i > 22   && i <= 28 )  displayBand16(3, (int)vReal[i] / amplitude); //   400 - 500Hz
+      if (i > 28  && i <= 33 )  displayBand16(4, (int)vReal[i] / amplitude); //    500 - 600 Hz
+      if (i > 33  && i <= 39 )  displayBand16(5, (int)vReal[i] / amplitude); //    600 - 700 Hz
+      if (i > 39  && i <= 44 ) displayBand16(6, (int)vReal[i] / amplitude); //     700 - 800Hz
+      if (i > 44   && i <= 50 )   displayBand16(7, (int)vReal[i] / amplitude); //  800-900Hz
+      if (i > 50   && i <= 55 )   displayBand16(8, (int)vReal[i] / amplitude); //  900-1000 Hz
+      if (i > 55   && i <= 83 )  displayBand16(9, (int)vReal[i] / amplitude); //   1 - 1.5KHz
+      if (i > 83  && i <= 110 )  displayBand16(10, (int)vReal[i] / amplitude);//   1.5 - 2 KHz
+      if (i > 110  && i <= 166 )  displayBand16(11, (int)vReal[i] / amplitude);//  2 - 3 KHz
+      if (i > 166  && i <= 221 ) displayBand16(12, (int)vReal[i] / amplitude); //  3 - 4 KHz
+      if (i > 221   && i <= 277 )  displayBand16(13, (int)vReal[i] / amplitude);// 4 - 5 KHz
+      if (i > 277  && i <= 332 )  displayBand16(14, (int)vReal[i] / amplitude); // 5 - 6 KHz
+      if (i > 332  && i < 512 )  displayBand16(15, (int)vReal[i] / amplitude); //  6 - 9.5 KHz
+
+      //Serial.println(i);
+    }
+  }
+  if (millis() % 4 == 0) {
+    for (byte band = 0; band <= 15; band++) {
+      if (peak[band] > 0) peak[band] -= 1; // Decay the peak
+    }
+  }
+  display.display();
+}
+
+void displayBand16(int band, int dsize) {
+  int dmax = 50;
+  if (dsize > dmax) dsize = dmax;
+  // if (band == 7) display.drawFastHLine(1 + 18 * 6, 0, 14, WHITE);
+  for (int s = 0; s <= dsize; s = s + 2) {
+    display.drawFastHLine( 2 + 8 * (band), 64 - s, 6, WHITE);
+  }
+  if (dsize > peak[band]) {
+    peak[band] = dsize;
+  }
+}
+
+void drawSpectrum32() {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("0 0.3 0.6 0.9  2 3  6");
+  display.setCursor(110, 8);
+  display.println("KHz");
+  for (int i = 2; i < (SAMPLES / 2); i++) { // Don't use sample 0 and only first SAMPLES/2 are usable. Each array eleement represents a frequency and its value the amplitude.
+    if (vReal[i] > 2000) { // Add a crude noise filter, 10 x amplitude or more
+      //  soundLevel = (int)vReal[i] / amplitude;
+      if (i <= 8 )             displayBand32(0, (int)vReal[i] / amplitude); //       0-150Hz
+      if (i > 8   && i <= 11 )   displayBand32(1, (int)vReal[i] / amplitude); //     150 - 200Hz
+      if (i > 11   && i <= 14 )   displayBand32(2, (int)vReal[i] / amplitude);//     200 - 250Hz
+      if (i > 14   && i <= 17 )  displayBand32(3, (int)vReal[i] / amplitude); //     250 - 300Hz
+      if (i > 17  && i <= 19 )  displayBand32(4, (int)vReal[i] / amplitude); //      300 - 350 Hz
+      if (i > 19  && i <= 22 )  displayBand32(5, (int)vReal[i] / amplitude); //      350 - 400 Hz
+      if (i > 22  && i <= 25 ) displayBand32(6, (int)vReal[i] / amplitude); //       400 - 450Hz
+      if (i > 25   && i <= 28 )   displayBand32(7, (int)vReal[i] / amplitude);//     450-500Hz
+      if (i > 28   && i <= 30 )   displayBand32(8, (int)vReal[i] / amplitude);//     500-550Hz
+      if (i > 30   && i <= 33 )  displayBand32(9, (int)vReal[i] / amplitude); //     550 - 600Hz
+      if (i > 33  && i <= 36 )  displayBand32(10, (int)vReal[i] / amplitude); //     600 - 650 Hz
+      if (i > 36  && i <= 39 )  displayBand32(11, (int)vReal[i] / amplitude); //     650 - 700 Hz
+      if (i > 39  && i <= 42 ) displayBand32(12, (int)vReal[i] / amplitude); //      700 - 750
+      if (i > 42   && i <= 44 )  displayBand32(13, (int)vReal[i] / amplitude);//     750 - 800
+      if (i > 44  && i <= 47 )  displayBand32(14, (int)vReal[i] / amplitude); //     800 - 850 Hz
+      if (i > 47  && i < 50 )  displayBand32(15, (int)vReal[i] / amplitude); //      850 - 900 Hz
+      if (i > 50   && i <= 52 )   displayBand32(16, (int)vReal[i] / amplitude); //   900-950Hz
+      if (i > 52   && i <= 55 )   displayBand32(17, (int)vReal[i] / amplitude); //   950-1000Hz
+      if (i > 55   && i <= 69 )  displayBand32(18, (int)vReal[i] / amplitude); //    1000 - 1250Hz
+      if (i > 69  && i <= 83 )  displayBand32(19, (int)vReal[i] / amplitude); //     1250 - 1500 Hz
+      if (i > 83  && i <= 97 )  displayBand32(20, (int)vReal[i] / amplitude); //     1500 - 1750 Hz
+      if (i > 97  && i <= 111 ) displayBand32(21, (int)vReal[i] / amplitude); //     1750 - 2000Hz
+      if (i > 111   && i <= 125 )   displayBand32(22, (int)vReal[i] / amplitude); // 2000-2250Hz
+      if (i > 125   && i <= 138 )   displayBand32(23, (int)vReal[i] / amplitude); // 2250-2500Hz
+      if (i > 138   && i <= 152 )  displayBand32(24, (int)vReal[i] / amplitude); //  2500 - 2750Hz
+      if (i > 152  && i <= 166 )  displayBand32(25, (int)vReal[i] / amplitude); //   2750 - 3000 Hz
+      if (i > 166  && i <= 194 )  displayBand32(26, (int)vReal[i] / amplitude); //   3000 - 3500 Hz
+      if (i > 194  && i <= 221 ) displayBand32(27, (int)vReal[i] / amplitude); //    3500 - 4000 Hz
+      if (i > 221   && i <= 249 )  displayBand32(28, (int)vReal[i] / amplitude); //  4000 - 4500 Hz
+      if (i > 249  && i <= 277 )  displayBand32(29, (int)vReal[i] / amplitude); //   4500 - 5000 Hz
+      if (i > 277  && i < 332 )  displayBand32(30, (int)vReal[i] / amplitude); //    5000 - 6000 Hz
+      if (i > 332  && i < 512 )  displayBand32(31, (int)vReal[i] / amplitude); //    5000 - 9000 Hz
+    }
+  }
+  if (millis() % 4 == 0) {
+    for (byte band = 0; band <= 31; band++) {
+      if (peak[band] > 0) peak[band] -= 1; // Decay the peak
+    }
+  }
+  display.display();
+}
+
+void displayBand32(int band, int dsize) {
+  int dmax = 50;
+  if (dsize > dmax) dsize = dmax;
+  // if (band == 7) display.drawFastHLine(1 + 18 * 6, 0, 14, WHITE);
+  for (int s = 0; s <= dsize; s = s + 2) {
+    display.drawFastHLine( 1 + 4 * (band), 64 - s, 3, WHITE);
+  }
+  if (dsize > peak[band]) {
+    peak[band] = dsize;
+  }
+}
+
+
+void drawInNotes(double fn) {
+  //  display.clearDisplay();
+  //  display.drawBitmap(0, 0, ArduinoIcon, 128, 64, 1);
+  display.setCursor(0, 2);
+  display.println(fn);
+  //  display.invertDisplay(true);
+
+  n = detectNoteNum(fn);
+
+  if (n >= 0 && n <= 11 ) {
+    detectNoteHeight(n);
+    drawNotes(90, notey);
+    display.setCursor(48, 2);
+    display.print(noteName);
+    display.print("4");
+  } else if (n >= 12 && n <= 23) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    drawNotes(90, notey - 28);
+    display.setCursor(48, 2);
+    display.print(noteName);
+    display.print("5");
+  } else if (n >= -12 && n <= -1) {
+    int modN = int(((n + 12) % 12));
+    detectNoteHeight(modN);
+    drawNotes(47 , notey - 20);
+    display.setCursor(48, 2);
+    display.print(noteName);
+    display.print("3");
+  }  else if (n >= -24 && n <= -13) {
+    int modN = int((12 + ((n) % 12)) % 12);
+    detectNoteHeight(modN);
+    drawNotes(47 , notey + 8 );
+    display.setCursor(48, 2);
+    display.print(noteName);
+    display.print("2");
+  }  else if (n >= 24 && n <= 35) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    display.setCursor(48, 2);
+    display.print(noteName);
+    display.print("6");
+    drawNotes(90, notey - 28);
+    display.setCursor(68, 0);
+    display.println("8va-");
+  }
+  else if (n >= 36 && n <= 47) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    drawNotes(90, notey - 28);
+    display.setCursor(48, 2);
+    display.print(noteName);
+    display.print("7");
+    display.setCursor(68, 0);
+    display.println("15ma-");
+  }
+  else if (n >= 48 && n <= 59) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    display.setCursor(48, 2);
+    display.print(noteName);
+    display.print("8");
+  }
+  else if (n >= 60 && n <= 71) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    display.setCursor(48, 2);
+    display.print(noteName);
+    display.print("9");
+  } else if (n >= -36 && n <= -25) {
+    int modN = int((12 + ((n) % 12)) % 12);
+    detectNoteHeight(modN);
+    display.setCursor(48, 2);
+    display.print(noteName);
+    display.print("1");
+
+  }
+  // display.display();
+}
+int detectNoteNum(double fn) {
+  int n;
+  double res = (12 * log(fn / f0)) / log(2);
+  if (res >= 0 ) {
+    n = int(res);
+  } else {
+    n = int(res) - 1;
+  }
+  return n;
+}
+
+void detectNoteHeight(int n) {
+  //  C4
+  if (n == 0 ) {
+    notey =  58;
+    isSharp = false;
+    noteName = "C";
+  }
+  //C#4
+  else   if (n == 1 ) {
+    isSharp = true;
+    notey =  58;
+    noteName = "CS";
+  }
+  // D4
+  else   if (n == 2 ) {
+    notey =  54;
+    isSharp = false;
+    noteName = "D";
+  }
+  // D#4
+  else   if (n == 3 ) {
+    isSharp = true;
+    notey = 54;
+    noteName = "DS";
+  }
+  // E4
+  else   if (n == 4) {
+    notey = 50;
+    isSharp = false;
+    noteName = "E";
+  }
+  // F4
+  else   if (n == 5) {
+    notey =  46;
+    isSharp = false;
+    noteName = "F";
+  }
+  // F#4
+  else   if (n == 6 ) {
+    isSharp = true;
+    notey = 46;
+    noteName = "FS";
+
+  }
+  // G4
+  else   if (n == 7 ) {
+    notey = 42;
+    isSharp = false;
+    noteName = "G";
+  }
+  //G#4
+  else   if (n == 8) {
+
+    isSharp = true;
+    notey =  42;
+    noteName = "GS";
+  }
+  // A4
+  else   if (n == 9 ) {
+    notey =  38;
+    isSharp = false;
+    noteName = "A";
+
+  }
+  // A#4
+  else   if (n == 10 ) {
+    // position to display
+    isSharp = true;
+    notey =  38;
+    noteName = "AS";
+  }
+  //B4
+  else   if (n == 11 ) {
+    notey =  34;
+    isSharp = false;
+    noteName = "B";
+  }
+
+}
+
+void drawNotes(int notex, int notey) {
+
+  if (notey == 0) {
+    //display.drawBitmap(0, 0, ArduinoIcon, 128, 64, 1);
+  }
+  if (notey != 6) {
+    display.drawCircle(notex, notey,  4, WHITE);
+  }
+  // display.drawCircle(notex, notey,  4, WHITE);
+  if (isSharp == true) {
+    display.setCursor(notex - 11, notey - 4);
+    display.println("#"); // text to display
+  }
+  if (notey == 58 || notey == 10) {
+    display.drawLine(notex - 7, notey , notex + 7, notey, WHITE);
+  }
+  if (notey == 6) {
+    display.drawCircle(notex, 12,  4, WHITE);
+    display.drawLine(notex - 7, 15 , notex + 7, 15, WHITE);
+  }
+  if (notey == 62) {
+    display.drawLine(notex - 7, notey - 4 , notex + 7, notey - 4, WHITE);
+  }
+}
+
+void eraseMaxPeak(double pk) {
+  // int n1 = detectNoteNum(pk);
+  int maxAmp = -1;
+  int maxInd = 0;
+  for (int i = 2; i < SAMPLES / 2; i++) {
+    //    double curPeak = i * (SAMPLING_FREQUENCY / 2) / (SAMPLES / 2);
+    //    int n2 = detectNoteNum(curPeak);
+    //    if (n2 == n1) {
+    //      vReal[i] = 0;
+    //      vReal[i +  SAMPLES / 2] = 0;
+    //    }
+
+    if (vReal[i] > maxAmp) {
+      maxAmp = vReal[i];
+      maxInd = i;
+    }
+  }
+  vReal[maxInd] = 0;
+  vReal[maxInd +  SAMPLES / 2] = 0;
+
+}
+
+void drawSecondNote(double pk, int x) {
+  //  display.clearDisplay();
+  //  display.drawBitmap(0, 0, ArduinoIcon, 128, 64, 1);
+
+  //  display.invertDisplay(true);
+
+  int n = detectNoteNum(pk);
+
+  if (n >= 0 && n <= 11 ) {
+    detectNoteHeight(n);
+    drawNotes(x, notey);
+    //    display.setCursor(55, 2);
+    //    display.print(noteName);
+    //    display.print("4");
+  } else if (n >= 12 && n <= 23) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    drawNotes(x, notey - 28);
+    //    display.setCursor(55, 2);
+    //    display.print(noteName);
+    //    display.print("5");
+  } else if (n >= -12 && n <= -1) {
+    int modN = int(((n + 12) % 12));
+    detectNoteHeight(modN);
+    //x-58
+    drawNotes(47 , notey - 20);
+    //    display.setCursor(55, 2);
+    //    display.print(noteName);
+    //    display.print("3");
+  }  else if (n >= -24 && n <= -13) {
+    int modN = int((12 + ((n) % 12)) % 12);
+    detectNoteHeight(modN);
+    //x - 48
+    drawNotes(47 , notey + 8 );
+    //    display.setCursor(55, 2);
+    //    display.print(noteName);
+    //    display.print("2");
+  }  else if (n >= 24 && n <= 35) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    //    display.setCursor(55, 2);
+    //    display.print(noteName);
+    //    display.print("6");
+    drawNotes(x, notey - 28);
+    display.setCursor(92, 0);
+    display.println("8va-");
+  }
+  else if (n >= 36 && n <= 47) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    drawNotes(x, notey - 28);
+    //    display.setCursor(55, 2);
+    //    display.print(noteName);
+    //    display.print("7");
+    display.setCursor(98, 0);
+    display.println("15ma-");
+  }
+  else if (n >= 48 && n <= 59) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    //    display.setCursor(55, 2);
+    //    display.print(noteName);
+    //    display.print("8");
+  }
+  else if (n >= 60 && n <= 71) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    //    display.setCursor(55, 2);
+    //    display.print(noteName);
+    //    display.print("9");
+  } else if (n >= -36 && n <= -25) {
+    int modN = int((12 + ((n) % 12)) % 12);
+    detectNoteHeight(modN);
+    //    display.setCursor(55, 2);
+    //    display.print(noteName);
+    //    display.print("1");
+
+  }
+  // display.display();
+}
+
+void countSoundLevel() {
+  soundLevel = 1 ;
+  int sum = 0;
+  for (int i = 6; i < (SAMPLES / 2); i ++ ) {
+    sum += vReal[i];
+  }
+
+  if ((sum / ((SAMPLES / 2) - 6)) < 500) {
+    soundLevel = 0;
+  }
+}
+void findInterval(double f1, double f2, String& str1, String& str2) {
+  int n1 = detectNoteNum(f1);
+  int n2 = detectNoteNum(f2);
+
+  int interval = abs(n2 - n1);
+  if (interval == 0) {
+    str1 = "Perfect";
+    str2 = "prime";
+  } else if (interval == 1) {
+    str1 = "Minor";
+    str2 = "second";
+  } else if (interval == 2) {
+    str1 = "Major";
+    str2 = "second";
+  } else if (interval == 3) {
+    str1 = "Minor";
+    str2 = "third";
+  } else if (interval == 4) {
+    str1 = "Major";
+    str2 = "third";
+  } else if (interval == 5) {
+    str1 = "Perfect";
+    str2 = "fourth";
+  } else if (interval == 6) {
+    str1 = "Tritone";
+    str2 = "";
+  } else if (interval == 7) {
+    str1 = "Perfect";
+    str2 = "fifth";
+  } else if (interval == 8) {
+    str1 = "Minor";
+    str2 = "sixth";
+  } else if (interval == 9) {
+    str1 = "Major";
+    str2 = "sixth";
+  } else if (interval == 10) {
+    str1 = "Minor";
+    str2 = "seventh";
+  } else if (interval == 11) {
+    str1 = "Major";
+    str2 = "seventh";
+  } else if (interval == 12) {
+    str1 = "Pecfect";
+    str2 = "octave";
+  } else {
+    str1 = "";
+    str2 = "";
+  }
+}
+
+String detectNoteName(double pk) {
+  n = detectNoteNum(pk);
+  String note;
+  String octaveNum;
+  if (n >= 0 && n <= 11 ) {
+    detectNoteHeight(n);
+    octaveNum = "4";
+  } else if (n >= 12 && n <= 23) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    octaveNum = "5";
+  } else if (n >= -12 && n <= -1) {
+    int modN = int(((n + 12) % 12));
+    detectNoteHeight(modN);
+    octaveNum = "3";
+  }  else if (n >= -24 && n <= -13) {
+    int modN = int((12 + ((n) % 12)) % 12);
+    detectNoteHeight(modN);
+    octaveNum = "2";
+  }  else if (n >= 24 && n <= 35) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    octaveNum = "6";
+  }
+  else if (n >= 36 && n <= 47) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    octaveNum = "7";
+  }
+  else if (n >= 48 && n <= 59) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+    octaveNum = "8";
+  }
+  else if (n >= 60 && n <= 71) {
+    int modN = int(n % 12);
+    detectNoteHeight(modN);
+
+    octaveNum = "9";
+
+  } else if (n >= -36 && n <= -25) {
+    int modN = int((12 + ((n) % 12)) % 12);
+    detectNoteHeight(modN);
+    octaveNum = "1";
+
+  }
+  note = noteName + octaveNum;
+  return note;
+}
+
+double findMaxAmp() {
+  int maxAmp = -1;
+  int maxInd = 0;
+  for (int i = 2; i < SAMPLES / 2; i++) {
+    if (vReal[i] > maxAmp) {
+      maxAmp = vReal[i];
+      maxInd = i;
+    }
+  }
+  return maxAmp;
+}
+
+void writeNotesInSerial(int num) {
+
+  double curpeak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+  String peak1 = detectNoteName(curpeak);
+  Serial.print(peak1);
+
+  if (numOfNotes > 1) {
+    for (int i = 1; i < num; i ++) {
+      curpeak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+      eraseMaxPeak(curpeak);
+      double nextpeak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+      // curpeak = nextpeak;
+      String nextPeakStr = detectNoteName(nextpeak);
+      Serial.print(" ");
+      Serial.print(nextPeakStr);
+
+    }
+  }
+  Serial.print("\n");
+}
